@@ -1,24 +1,38 @@
+use std::fs::File;
 use url::Url;
 
 use io::{Read, Write};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{io, io::BufRead};
+use x509_parser::prelude::*;
 
 use crate::{GemResponse, GemStatus, GeminiClient, PopResult};
+
+fn fingerprint(cert: &rustls::Certificate) -> std::result::Result<String, String> {
+    let (_, pk) = X509Certificate::from_der(cert.as_ref()).unwrap();
+    let res = pk.public_key().subject_public_key.as_ref();
+
+    Ok(format!("{:?}", res))
+}
 
 struct TofuVerification {}
 
 impl rustls::client::ServerCertVerifier for TofuVerification {
     fn verify_server_cert(
         &self,
-        _end_entity: &rustls::Certificate,
+        cert: &rustls::Certificate,
         _intermediates: &[rustls::Certificate],
         _server_name: &rustls::ServerName,
         _scts: &mut dyn Iterator<Item = &[u8]>,
         _ocsp: &[u8],
         _now: std::time::SystemTime,
     ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
+        let path = "cert.der";
+        let mut file = File::create(path).unwrap();
+        file.write_all(cert.as_ref()).unwrap();
+        let fingerprint = fingerprint(cert).unwrap();
+
         Ok(rustls::client::ServerCertVerified::assertion())
     }
 }
