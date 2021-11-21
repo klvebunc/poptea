@@ -1,15 +1,15 @@
-use std::net::TcpStream;
+use url::Url;
 
 use io::{Read, Write};
-use std::io;
+use std::str::FromStr;
 use std::sync::Arc;
-use rustls::ClientConnection;
+use std::{io, io::BufRead};
 
-use crate::{PopResult, GemResponse, GeminiClient};
+use crate::{GemResponse, GemStatus, GeminiClient, PopResult};
 
-struct NoCertificateVerification {}
+struct TofuVerification {}
 
-impl rustls::client::ServerCertVerifier for NoCertificateVerification {
+impl rustls::client::ServerCertVerifier for TofuVerification {
     fn verify_server_cert(
         &self,
         _end_entity: &rustls::Certificate,
@@ -23,48 +23,63 @@ impl rustls::client::ServerCertVerifier for NoCertificateVerification {
     }
 }
 
-struct TlsClient {
-    socket: TcpStream,
-    closing: bool,
-    clean_closure: bool,
-    tls_conn: rustls::ClientConnection,
-}
+pub struct TlsClient {}
 
 impl TlsClient {
-    fn new(
-        sock: TcpStream,
-        server_name: rustls::ServerName,
-        cfg: Arc<rustls::ClientConfig>,
-    ) -> Self {
-        Self {
-            socket: sock,
-            closing: false,
-            clean_closure: false,
-            tls_conn: ClientConnection::new(cfg, server_name).unwrap(),
-        }
+    pub fn new() -> Self {
+        Self {}
     }
 
-    fn get_stream(&self, url: &str) -> PopResult<rustls::Stream<ClientConnection, TcpStream>> {
+    pub fn get_plain(&self, url: &str) -> PopResult<Vec<u8>> {
+        let url = Url::parse(url).map_err(|_| crate::PopError::Local("failed to parse".into()))?;
         let root_store = rustls::RootCertStore::empty();
+
+        let mut plaintext = vec![];
+        let host = url
+            .host_str()
+            .ok_or_else(|| crate::PopError::Local("host is missing".into()))?;
+        let addr = format!("{}:{:?}", host, url.port().unwrap_or(1965));
+        let req = format!("{}\r\n", url);
+
         let mut config = rustls::ClientConfig::builder()
             .with_safe_defaults()
             .with_root_certificates(root_store)
             .with_no_client_auth();
         config
             .dangerous()
-            .set_certificate_verifier(Arc::new(NoCertificateVerification {}));
+            .set_certificate_verifier(Arc::new(TofuVerification {}));
         let arc = std::sync::Arc::new(config);
 
-        let mut sess =
-            rustls::ClientConnection::new(arc, "transjovian.org".try_into().unwrap()).unwrap();
-        let mut sock = std::net::TcpStream::connect("transjovian.org:1965").unwrap();
+        let mut sess = rustls::ClientConnection::new(arc, host.try_into().unwrap()).unwrap();
+        let mut sock = std::net::TcpStream::connect(addr).unwrap();
         let mut stream = rustls::Stream::new(&mut sess, &mut sock);
-        Ok(stream)
+        stream.write_all(req.as_bytes()).unwrap();
+        stream.read_to_end(&mut plaintext).unwrap();
+
+        Ok(plaintext)
     }
 }
 
 impl GeminiClient for TlsClient {
     fn get(&self, url: &str) -> PopResult<GemResponse> {
-        unimplemented!()
+        let plaintext = self.get_plain(url)?;
+        let header = plaintext.lines().next().unwrap().unwrap();
+        let body = plaintext[header.len()..].to_vec();
+
+        let (status, meta) = header
+            .split_once(" ")
+            .map(|(s, m)| (GemStatus::from_str(s), m.into()))
+            .ok_or_else(|| crate::PopError::Remote("invalid header".into()))?;
+
+        let body = match &body.len() {
+            0 => None,
+            _ => Some(body),
+        };
+
+        Ok(GemResponse {
+            status: status?,
+            meta,
+            body,
+        })
     }
 }

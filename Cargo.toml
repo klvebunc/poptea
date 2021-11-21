@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 rustls = {version = "0.20.1", features = ["dangerous_configuration"]}
+url = "2.2.2"

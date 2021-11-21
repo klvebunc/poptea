@@ -1,3 +1,3 @@
 mod client;
 
-pub use client::RustlsClient;
+pub use client::TlsClient;

@@ -1,6 +1,9 @@
 mod infra;
+pub use infra::TlsClient;
+use std::str::FromStr;
 
-enum GemStatus {
+#[derive(Debug)]
+pub enum GemStatus {
     Input,
     SensitiveInput,
     Success,
@@ -21,21 +24,35 @@ enum GemStatus {
     CertificateNotValid,
 }
 
-enum GemMimeType {
+#[derive(Debug)]
+pub enum GemMimeType {
     GeminiText,
 }
 
-struct GemResponse {
-    status: GemStatus,
-    meta: Option<String>,
-    body: Option<String>,
+#[derive(Debug)]
+pub struct GemResponse {
+    pub status: GemStatus,
+    pub meta: String,
+    pub body: Option<Vec<u8>>,
 }
 
-trait GeminiClient {
+impl FromStr for GemStatus {
+    type Err = PopError;
+
+    fn from_str(input: &str) -> Result<GemStatus, Self::Err> {
+        match input {
+            "20" => Ok(GemStatus::Success),
+            _ => Err(PopError::Local("unimplemented status code".into())),
+        }
+    }
+}
+
+pub trait GeminiClient {
     fn get(&self, url: &str) -> PopResult<GemResponse>;
 }
 
-enum PopError {
+#[derive(Debug)]
+pub enum PopError {
     Local(String),
     Remote(String),
 }
