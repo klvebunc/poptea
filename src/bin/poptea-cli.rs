@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use io::{Read, Write};
 use std::io;
+use std::sync::Arc;
 
 fn main() {
     let root_store = rustls::RootCertStore::empty();
@@ -8,15 +8,19 @@ fn main() {
         .with_safe_defaults()
         .with_root_certificates(root_store)
         .with_no_client_auth();
-    config.dangerous()
-        .set_certificate_verifier(Arc::new(NoCertificateVerification{}));
+    config
+        .dangerous()
+        .set_certificate_verifier(Arc::new(NoCertificateVerification {}));
     let arc = std::sync::Arc::new(config);
 
-    let mut sess = rustls::ClientConnection::new(arc, "transjovian.org".try_into().unwrap()).unwrap();
+    let mut sess =
+        rustls::ClientConnection::new(arc, "transjovian.org".try_into().unwrap()).unwrap();
     let mut sock = std::net::TcpStream::connect("transjovian.org:1965").unwrap();
     let mut stream = rustls::Stream::new(&mut sess, &mut sock);
 
-    stream.write_all(b"gemini://transjovian.org/oracle/\r\n").unwrap();
+    stream
+        .write_all(b"gemini://transjovian.org/oracle/\r\n")
+        .unwrap();
     let mut plaintext = Vec::new();
     stream.read_to_end(&mut plaintext).unwrap();
     io::stdout().write_all(&plaintext).unwrap();
@@ -37,4 +41,3 @@ impl rustls::client::ServerCertVerifier for NoCertificateVerification {
         Ok(rustls::client::ServerCertVerified::assertion())
     }
 }
-

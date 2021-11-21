@@ -1,3 +1,5 @@
+mod infra;
+
 enum GemStatus {
     Input,
     SensitiveInput,
@@ -29,12 +31,13 @@ struct GemResponse {
     body: Option<String>,
 }
 
-enum GemError {
+trait GeminiClient {
+    fn get(&self, url: &str) -> PopResult<GemResponse>;
+}
+
+enum PopError {
     Local(String),
     Remote(String),
 }
 
-trait GeminiClient {
-    fn get(&self, url: &str) -> Result<GemResponse, GemError>;
-}
-
+pub type PopResult<T> = Result<T, PopError>;
