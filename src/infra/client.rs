@@ -4,19 +4,21 @@ use url::Url;
 use io::{Read, Write};
 use std::str::FromStr;
 use std::sync::Arc;
-use std::{io, io::BufRead};
+use std::{io, io::BufRead, convert::Into};
 use x509_parser::prelude::*;
 
-use crate::{GemResponse, GemStatus, GeminiClient, PopResult};
+use crate::{GemResponse, GemStatus, GeminiClient, PopResult, TrustStore, VerifyStatus};
 
-fn fingerprint(cert: &rustls::Certificate) -> std::result::Result<String, String> {
+fn fingerprint(cert: &rustls::Certificate) -> PopResult<(String, String)> {
     let (_, pk) = X509Certificate::from_der(cert.as_ref()).unwrap();
     let res = pk.public_key().subject_public_key.as_ref();
 
-    Ok(format!("{:?}", res))
+    Ok((pk.subject().to_string(), format!("{:?}", res)))
 }
 
-struct TofuVerification {}
+struct TofuVerification {
+    store: Arc<dyn TrustStore>,
+}
 
 impl rustls::client::ServerCertVerifier for TofuVerification {
     fn verify_server_cert(
@@ -31,17 +33,24 @@ impl rustls::client::ServerCertVerifier for TofuVerification {
         let path = "cert.der";
         let mut file = File::create(path).unwrap();
         file.write_all(cert.as_ref()).unwrap();
-        let fingerprint = fingerprint(cert).unwrap();
-
-        Ok(rustls::client::ServerCertVerified::assertion())
+        let (addr, fingerprint) = fingerprint(cert).unwrap();
+        match self.store.verify(&addr, fingerprint) {
+            Ok(VerifyStatus::Trusted) => Ok(rustls::client::ServerCertVerified::assertion()),
+            Ok(VerifyStatus::Untrusted) => {
+                Err(rustls::Error::InvalidCertificateData("untrusted".into()))
+            }
+            Err(_) => Err(rustls::Error::General("storage error".into())),
+        }
     }
 }
 
-pub struct TlsClient {}
+pub struct TlsClient {
+    store: Arc<dyn TrustStore>,
+}
 
 impl TlsClient {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(store: Arc<dyn TrustStore>) -> Self {
+        Self { store }
     }
 
     pub fn get_plain(&self, url: &str) -> PopResult<Vec<u8>> {
@@ -61,7 +70,9 @@ impl TlsClient {
             .with_no_client_auth();
         config
             .dangerous()
-            .set_certificate_verifier(Arc::new(TofuVerification {}));
+            .set_certificate_verifier(Arc::new(TofuVerification {
+                store: self.store.clone(),
+            }));
         let arc = std::sync::Arc::new(config);
 
         let mut sess = rustls::ClientConnection::new(arc, host.try_into().unwrap()).unwrap();

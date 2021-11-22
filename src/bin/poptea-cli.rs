@@ -1,10 +1,12 @@
 use io::Write;
 use poptea::GeminiClient;
-use std::io;
+use std::{io, sync::Arc};
 
 fn main() {
     let url = std::env::args().nth(1).expect("please provide gemini url");
-    let client = poptea::TlsClient::new();
+    let fs = poptea::FileSystem::new("~/.poptea".into());
+
+    let client = poptea::TlsClient::new(Arc::new(fs));
     let res = client.get(&url).expect("failed to make a request");
 
     io::stdout()

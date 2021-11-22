@@ -1,6 +1,7 @@
-mod infra;
-pub use infra::TlsClient;
 use std::str::FromStr;
+
+mod infra;
+pub use infra::{TlsClient, FileSystem};
 
 #[derive(Debug)]
 pub enum GemStatus {
@@ -58,3 +59,13 @@ pub enum PopError {
 }
 
 pub type PopResult<T> = Result<T, PopError>;
+
+pub trait TrustStore: Send + Sync {
+    fn verify(&self, addr: &str, fingerprint: String) -> PopResult<VerifyStatus>;
+}
+
+pub enum VerifyStatus {
+    Trusted,
+    Untrusted,
+}
+
