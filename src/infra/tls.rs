@@ -1,18 +1,18 @@
-use std::fs::File;
-use url::Url;
-
 use data_encoding::BASE32HEX_NOPAD;
 use io::{Read, Write};
 use sha3::{Digest, Sha3_256};
+use std::fs::File;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::{convert::Into, io, io::BufRead};
+use url::Url;
 use x509_parser::prelude::*;
 
-use crate::{GemResponse, GemStatus, GeminiClient, PopResult, TrustStore, VerifyStatus};
+use crate::{GemResponse, GemStatus, GeminiClient, PopError, PopResult, TrustStore, VerifyStatus};
 
 fn fingerprint(cert: &rustls::Certificate) -> PopResult<(String, String)> {
-    let (_, pk) = X509Certificate::from_der(cert.as_ref()).unwrap();
+    let (_, pk) = X509Certificate::from_der(cert.as_ref())
+        .map_err(|err| PopError::Remote(err.to_string()))?;
     let sub = pk.subject().to_string();
     let sub_pk = pk.public_key().subject_public_key.as_ref();
 
@@ -38,10 +38,16 @@ impl rustls::client::ServerCertVerifier for TofuVerification {
         _now: std::time::SystemTime,
     ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
         let path = "cert.der";
-        let mut file = File::create(path).unwrap();
-        file.write_all(cert.as_ref()).unwrap();
-        let (addr, fingerprint) = fingerprint(cert).unwrap();
-        let store = self.store.lock().unwrap().verify(&addr, fingerprint);
+        let mut file = File::create(path).map_err(|e| rustls::Error::General(e.to_string()))?;
+        file.write_all(cert.as_ref())
+            .map_err(|e| rustls::Error::General(e.to_string()))?;
+        let (addr, fingerprint) =
+            fingerprint(cert).map_err(|e| rustls::Error::General(e.to_string()))?;
+        let store = self
+            .store
+            .lock()
+            .map_err(|e| rustls::Error::General(e.to_string()))?
+            .verify(&addr, fingerprint);
         match store {
             Ok(VerifyStatus::Trusted) => Ok(rustls::client::ServerCertVerified::assertion()),
             Ok(VerifyStatus::Untrusted) => Err(rustls::Error::General("untrusted".into())),
@@ -66,7 +72,7 @@ impl TlsClient {
         let mut plaintext = vec![];
         let host = url
             .host_str()
-            .ok_or_else(|| crate::PopError::Local("host is missing".into()))?;
+            .ok_or_else(|| PopError::Local("host is missing".into()))?;
         let addr = format!("{}:{:?}", host, url.port().unwrap_or(1965));
         let req = format!("{}\r\n", url);
 
@@ -81,11 +87,22 @@ impl TlsClient {
             }));
         let arc = std::sync::Arc::new(config);
 
-        let mut sess = rustls::ClientConnection::new(arc, host.try_into().unwrap()).unwrap();
-        let mut sock = std::net::TcpStream::connect(addr).unwrap();
+        let mut sess = rustls::ClientConnection::new(
+            arc,
+            host.try_into()
+                .map_err(|_| PopError::Local("failed to parse host".into()))?,
+        )
+        .map_err(|e| PopError::Remote(e.to_string()))?;
+
+        let mut sock =
+            std::net::TcpStream::connect(addr).map_err(|e| PopError::Local(e.to_string()))?;
         let mut stream = rustls::Stream::new(&mut sess, &mut sock);
-        stream.write_all(req.as_bytes()).unwrap();
-        stream.read_to_end(&mut plaintext).unwrap();
+        stream
+            .write_all(req.as_bytes())
+            .map_err(|e| PopError::Local(e.to_string()))?;
+        stream
+            .read_to_end(&mut plaintext)
+            .map_err(|e| PopError::Local(e.to_string()))?;
 
         Ok(plaintext)
     }
@@ -94,13 +111,17 @@ impl TlsClient {
 impl GeminiClient for TlsClient {
     fn get(&self, url: &str) -> PopResult<GemResponse> {
         let plaintext = self.get_plain(url)?;
-        let header = plaintext.lines().next().unwrap().unwrap();
+        let header = plaintext
+            .lines()
+            .next()
+            .ok_or_else(|| PopError::Local("header is not present".into()))?
+            .map_err(|e| PopError::Remote(e.to_string()))?;
         let body = plaintext[header.len()..].to_vec();
 
         let (status, meta) = header
             .split_once(" ")
             .map(|(s, m)| (GemStatus::from_str(s), m.into()))
-            .ok_or_else(|| crate::PopError::Remote("invalid header".into()))?;
+            .ok_or_else(|| PopError::Remote("invalid header".into()))?;
 
         let body = match &body.len() {
             0 => None,

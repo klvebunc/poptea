@@ -1,3 +1,4 @@
+use std::fmt;
 use std::str::FromStr;
 
 mod infra;
@@ -56,6 +57,15 @@ pub trait GeminiClient {
 pub enum PopError {
     Local(String),
     Remote(String),
+}
+
+impl fmt::Display for PopError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PopError::Local(e) => write!(f, "{}", e.to_string()),
+            PopError::Remote(e) => write!(f, "{}", e.to_string()),
+        }
+    }
 }
 
 pub type PopResult<T> = Result<T, PopError>;

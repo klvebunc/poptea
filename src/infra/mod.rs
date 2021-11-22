@@ -1,5 +1,5 @@
-mod client;
 mod fs;
+mod tls;
 
-pub use client::TlsClient;
 pub use fs::FileSystem;
+pub use tls::TlsClient;

@@ -1,9 +1,9 @@
-use crate::{PopResult, TrustStore, VerifyStatus};
+use std::collections::HashMap;
 use std::fs::{create_dir, OpenOptions};
-use std::io::{self, BufRead};
 use std::io::prelude::*;
 use std::io::LineWriter;
-use std::collections::HashMap;
+use std::io::{self, BufRead};
+use crate::{PopError, PopResult, TrustStore, VerifyStatus};
 
 pub struct FileSystem {
     trust_store: HashMap<String, String>,
@@ -11,46 +11,50 @@ pub struct FileSystem {
 }
 
 impl FileSystem {
-    pub fn new(pop_dir: String) -> Self {
+    pub fn new(pop_dir: String) -> PopResult<Self> {
         let mut trust_store = HashMap::new();
-        Self::load_trust_store(&pop_dir, &mut trust_store);
+        Self::load_trust_store(&pop_dir, &mut trust_store)?;
 
-        Self { 
+        Ok(Self {
             trust_store,
             pop_dir,
-        }
+        })
     }
 
-    fn load_trust_store(pop_dir: &str, store: &mut HashMap<String, String>) {
+    fn load_trust_store(pop_dir: &str, store: &mut HashMap<String, String>) -> PopResult<()>{
         let trust_path = format!("{}/known_hosts", pop_dir);
         let file = OpenOptions::new()
             .write(true)
             .read(true)
-            .open(trust_path).unwrap();
+            .open(trust_path)
+            .map_err(|e| PopError::Local(e.to_string()))?;
 
         for line in io::BufReader::new(file).lines() {
             if let Ok(kh) = line {
-                let (host, fingerprint) = kh
-                    .split_once(" ").unwrap();
+                let (host, fingerprint) = kh.split_once(" ").ok_or_else(|| PopError::Local("failed parse fingerprint line".into()))?;
 
                 store.insert(host.to_string(), fingerprint.to_string());
             }
         }
+
+        Ok(())
     }
 
-    pub fn flush_trust_store(&self) {
+    pub fn flush_trust_store(&self) -> PopResult<()> {
         let trust_path = format!("{}/known_hosts", self.pop_dir);
         let file = OpenOptions::new()
             .write(true)
             .read(true)
-            .open(trust_path).unwrap();
+            .open(trust_path)
+            .map_err(|e| PopError::Local(e.to_string()))?;
         let mut file = LineWriter::new(file);
 
         for (h, f) in &self.trust_store {
-            file.write_all(format!("{} {}\n", h, f).as_bytes()).unwrap();
-        };
+            file.write_all(format!("{} {}\n", h, f).as_bytes()).map_err(|e| PopError::Local(e.to_string()))?;
+        }
 
-        file.flush().unwrap();
+        file.flush().map_err(|e| PopError::Local(e.to_string()))?;
+        Ok(())
     }
 }
 
