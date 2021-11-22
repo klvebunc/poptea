@@ -1,7 +1,6 @@
 use data_encoding::BASE32HEX_NOPAD;
 use io::{Read, Write};
 use sha3::{Digest, Sha3_256};
-use std::fs::File;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::{convert::Into, io, io::BufRead};
@@ -37,10 +36,6 @@ impl rustls::client::ServerCertVerifier for TofuVerification {
         _ocsp: &[u8],
         _now: std::time::SystemTime,
     ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
-        let path = "cert.der";
-        let mut file = File::create(path).map_err(|e| rustls::Error::General(e.to_string()))?;
-        file.write_all(cert.as_ref())
-            .map_err(|e| rustls::Error::General(e.to_string()))?;
         let (addr, fingerprint) =
             fingerprint(cert).map_err(|e| rustls::Error::General(e.to_string()))?;
         let store = self
