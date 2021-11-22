@@ -1,23 +1,30 @@
 use std::fs::File;
 use url::Url;
 
+use data_encoding::BASE32HEX_NOPAD;
 use io::{Read, Write};
+use sha3::{Digest, Sha3_256};
 use std::str::FromStr;
-use std::sync::Arc;
-use std::{io, io::BufRead, convert::Into};
+use std::sync::{Arc, Mutex};
+use std::{convert::Into, io, io::BufRead};
 use x509_parser::prelude::*;
 
 use crate::{GemResponse, GemStatus, GeminiClient, PopResult, TrustStore, VerifyStatus};
 
 fn fingerprint(cert: &rustls::Certificate) -> PopResult<(String, String)> {
     let (_, pk) = X509Certificate::from_der(cert.as_ref()).unwrap();
-    let res = pk.public_key().subject_public_key.as_ref();
+    let sub = pk.subject().to_string();
+    let sub_pk = pk.public_key().subject_public_key.as_ref();
 
-    Ok((pk.subject().to_string(), format!("{:?}", res)))
+    let mut hasher = Sha3_256::new();
+    hasher.update(sub_pk);
+    let result = hasher.finalize();
+
+    Ok((sub[3..].to_string(), BASE32HEX_NOPAD.encode(&result[..])))
 }
 
 struct TofuVerification {
-    store: Arc<dyn TrustStore>,
+    store: Arc<Mutex<dyn TrustStore>>,
 }
 
 impl rustls::client::ServerCertVerifier for TofuVerification {
@@ -34,22 +41,21 @@ impl rustls::client::ServerCertVerifier for TofuVerification {
         let mut file = File::create(path).unwrap();
         file.write_all(cert.as_ref()).unwrap();
         let (addr, fingerprint) = fingerprint(cert).unwrap();
-        match self.store.verify(&addr, fingerprint) {
+        let store = self.store.lock().unwrap().verify(&addr, fingerprint);
+        match store {
             Ok(VerifyStatus::Trusted) => Ok(rustls::client::ServerCertVerified::assertion()),
-            Ok(VerifyStatus::Untrusted) => {
-                Err(rustls::Error::InvalidCertificateData("untrusted".into()))
-            }
+            Ok(VerifyStatus::Untrusted) => Err(rustls::Error::General("untrusted".into())),
             Err(_) => Err(rustls::Error::General("storage error".into())),
         }
     }
 }
 
 pub struct TlsClient {
-    store: Arc<dyn TrustStore>,
+    store: Arc<Mutex<dyn TrustStore>>,
 }
 
 impl TlsClient {
-    pub fn new(store: Arc<dyn TrustStore>) -> Self {
+    pub fn new(store: Arc<Mutex<dyn TrustStore>>) -> Self {
         Self { store }
     }
 
