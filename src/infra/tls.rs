@@ -135,3 +135,12 @@ impl GeminiClient for TlsClient {
         })
     }
 }
+
+#[derive(Default)]
+pub struct NoTrustStore {}
+
+impl TrustStore for NoTrustStore {
+    fn verify(&mut self, _addr: &str, _fingerprint: String) -> PopResult<VerifyStatus> {
+        Ok(VerifyStatus::Trusted)
+    }
+}
