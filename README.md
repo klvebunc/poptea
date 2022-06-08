@@ -6,4 +6,4 @@ This library is used in another opensource project called [sic](https://github.c
 
 ## Usage
 
-Please refer to [`./bin/poptea-cli.rs`](bin/poptea-cli.rs) for how to use the library in a client side application.
+Please refer to [`./bin/poptea-cli.rs`](src/bin/poptea-cli.rs) for how to use the library in a client side application.
